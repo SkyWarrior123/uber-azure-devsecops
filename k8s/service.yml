@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: azure-demo-svc
+spec:
+  type: LoadBalancer
+  selector:
+    app: azure-demo
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80

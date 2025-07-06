@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azure-demo
+  labels:
+    app: azure-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: azure-demo
+  template:
+    metadata:
+      labels:
+        app: azure-demo
+    spec:
+      containers:
+        - name: azure-demo
+          image: ubercloneacr.azurecr.io/azure-demo:latest
+          ports:
+            - containerPort: 80
