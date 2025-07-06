@@ -1,0 +1,71 @@
+pipeline {
+  agent any
+  tools {
+    jdk 'jdk17'
+    nodejs 'node16'
+  }
+  environment {
+    SCANNER_HOME = tool 'sonar-scanner'
+    ACR         = "ubercloneacr.azurecr.io"
+  }
+  parameters {
+    choice(name: 'action', choices: ['apply','destroy'], description: 'Terraform action')
+  }
+  stages {
+    stage('Checkout') {
+      steps { git url: 'https://github.com/<your-username>/azure-devsecops-demo.git', branch: 'main' }
+    }
+    stage('SonarQube Analysis') {
+      steps {
+        withSonarQubeEnv('sonar-server') {
+          sh "$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectKey=AzureDemo -Dsonar.host.url=http://<VM-IP>:9000"
+        }
+      }
+    }
+    stage('Quality Gate') {
+      steps { waitForQualityGate abortPipeline: true }
+    }
+    stage('Install Dependencies') { steps { sh 'npm install' } }
+    stage('OWASP Dependency-Check') {
+      steps {
+        dependencyCheck additionalArguments: '--scan ./', odcInstallation: 'DP-Check'
+        dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+      }
+    }
+    stage('Trivy FS Scan') {
+      steps { sh 'trivy fs . > trivy_fs.txt' }
+      post { always { archiveArtifacts 'trivy_fs.txt' } }
+    }
+    stage('Docker Build & Push') {
+      steps {
+        script {
+          docker.withRegistry("https://${env.ACR}", 'acr-credentials-id') {
+            def img = docker.build("${env.ACR}/azure-demo:latest")
+            img.push()
+          }
+        }
+      }
+    }
+    stage('Trivy Image Scan') {
+      steps { sh "trivy image ${env.ACR}/azure-demo:latest > trivy_image.txt" }
+      post { always { archiveArtifacts 'trivy_image.txt' } }
+    }
+    stage('Terraform Apply/Destroy') {
+      steps {
+        dir('infrastructure') {
+          sh "terraform ${params.action} -auto-approve"
+        }
+      }
+    }
+    stage('Deploy to AKS') {
+      when { expression { params.action == 'apply' } }
+      steps {
+        sh 'az aks get-credentials --resource-group rg-uber-clone --name uberAKS'
+        dir('k8s') {
+          sh 'kubectl apply -f deployment.yml'
+          sh 'kubectl apply -f service.yml'
+        }
+      }
+    }
+  }
+}
